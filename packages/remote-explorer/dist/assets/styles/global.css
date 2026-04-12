@@ -1,0 +1,158 @@
+*, :before, :after, ::backdrop {
+  --un-rotate: 0;
+  --un-rotate-x: 0;
+  --un-rotate-y: 0;
+  --un-rotate-z: 0;
+  --un-scale-x: 1;
+  --un-scale-y: 1;
+  --un-scale-z: 1;
+  --un-skew-x: 0;
+  --un-skew-y: 0;
+  --un-translate-x: 0;
+  --un-translate-y: 0;
+  --un-translate-z: 0;
+  --un-pan-x: ;
+  --un-pan-y: ;
+  --un-pinch-zoom: ;
+  --un-scroll-snap-strictness: proximity;
+  --un-ordinal: ;
+  --un-slashed-zero: ;
+  --un-numeric-figure: ;
+  --un-numeric-spacing: ;
+  --un-numeric-fraction: ;
+  --un-border-spacing-x: 0;
+  --un-border-spacing-y: 0;
+  --un-ring-offset-shadow: 0 0 #0000;
+  --un-ring-shadow: 0 0 #0000;
+  --un-shadow-inset: ;
+  --un-shadow: 0 0 #0000;
+  --un-ring-inset: ;
+  --un-ring-offset-width: 0px;
+  --un-ring-offset-color: #fff;
+  --un-ring-width: 0px;
+  --un-ring-color: #93c5fd80;
+  --un-blur: ;
+  --un-brightness: ;
+  --un-contrast: ;
+  --un-drop-shadow: ;
+  --un-grayscale: ;
+  --un-hue-rotate: ;
+  --un-invert: ;
+  --un-saturate: ;
+  --un-sepia: ;
+  --un-backdrop-blur: ;
+  --un-backdrop-brightness: ;
+  --un-backdrop-contrast: ;
+  --un-backdrop-grayscale: ;
+  --un-backdrop-hue-rotate: ;
+  --un-backdrop-invert: ;
+  --un-backdrop-opacity: ;
+  --un-backdrop-saturate: ;
+  --un-backdrop-sepia: ;
+}
+
+.i-custom\:file {
+  background: url("data:image/svg+xml;utf8,%3Csvg width=%271em%27 height=%271em%27 id=%27%E5%9B%BE%E5%B1%82_1%27 data-name=%27%E5%9B%BE%E5%B1%82 1%27 xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 1024 1024%27%3E%3Ctitle%3Eunknown%3C/title%3E%3Cpath d=%27M186.9,64c-18.4,0-33.4,14.7-33.4,32.6V927.4c0,17.9,15,32.6,33.4,32.6H837.1c18.4,0,33.4-14.7,33.4-32.6V259.5L669.9,64Zm0,0%27 style=%27fill:%23e3ecff%27/%3E%3Cpath d=%27M669.9,64V226.9c0,17.9,15,32.6,33.4,32.6H870.5Zm0,0%27 style=%27fill:%2395a7cd%27/%3E%3Crect x=%27479.2%27 y=%27619.9%27 width=%2750%27 height=%2748.57%27 style=%27fill:%2395a7cd%27/%3E%3Cpath d=%27M518.9,363.4h-6.1c-56.3,0-91.3,27.4-104,81.3l-1.3,5.6L450,464.3l1.3-7.1c6.9-36.9,25.7-54.1,59.3-54.1h4.6c28.1,2.6,42.8,15.6,46.2,40.6,2.6,20.4-10.1,40.2-37.7,58.9s-41.2,44-40.1,72.9v20.7h42.8V576.9c-.9-17.7,7.9-32.8,26.1-45,38.3-26.2,56.7-55.7,54.6-87.8C602.9,393.6,573.3,366.5,518.9,363.4Z%27 style=%27fill:%2395a7cd%27/%3E%3C/svg%3E") 0 0 / 100% 100% no-repeat;
+  width: 1em;
+  height: 1em;
+}
+
+.i-custom\:folder {
+  background: url("data:image/svg+xml;utf8,%3Csvg width=%271em%27 height=%271em%27 id=%27%E5%9B%BE%E5%B1%82_1%27 data-name=%27%E5%9B%BE%E5%B1%82 1%27 xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 1024 1024%27%3E%3Ctitle%3Efolder%3C/title%3E%3Cpath d=%27M396.5,185.7l22.7,27.2a36.1,36.1,0,0,0,27.7,12.7H906.8c29.4,0,53.2,22.8,53.2,50.9V800.1c0,28.1-23.8,50.9-53.2,50.9H117.2C87.8,851,64,828.2,64,800.1V223.9c0-28.1,23.8-50.9,53.2-50.9H368.8A36.1,36.1,0,0,1,396.5,185.7Z%27 style=%27fill:%239fddff%27/%3E%3Cpath d=%27M64,342.5V797.8c0,29.4,24,53.2,53.6,53.2H906.4c29.6,0,53.6-23.8,53.6-53.2V342.5Z%27 style=%27fill:%2374c6ff%27/%3E%3C/svg%3E") 0 0 / 100% 100% no-repeat;
+  width: 1em;
+  height: 1em;
+}
+
+.mt-1 {
+  margin-top: .25rem;
+}
+
+.size-10 {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.h-50vh {
+  height: 50vh;
+}
+
+.max-w-full {
+  max-width: 100%;
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.flex-col {
+  flex-direction: column;
+}
+
+.hover\:cursor-not-allowed:hover {
+  cursor: not-allowed;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.gap-2 {
+  gap: .5rem;
+}
+
+.gap-4 {
+  gap: 1rem;
+}
+
+.overflow-y-auto {
+  overflow-y: auto;
+}
+
+.truncate {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.break-all {
+  word-break: break-all;
+}
+
+.border-rounded {
+  border-radius: .25rem;
+}
+
+.hover\:bg-\[var\(--interactive-accent\)\]:hover {
+  background-color: var(--interactive-accent);
+}
+
+.px-1 {
+  padding-left: .25rem;
+  padding-right: .25rem;
+}
+
+.text-xs {
+  font-size: .75rem;
+  line-height: 1rem;
+}
+
+.no-underline {
+  text-decoration: none;
+}
+
+.opacity-20 {
+  opacity: .2;
+}
+
+.scrollbar-hide {
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
