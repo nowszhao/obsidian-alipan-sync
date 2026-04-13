@@ -3,8 +3,9 @@
  *
  * Handles OAuth2 authorization, account display, and logout for Alipan.
  * UX flow:
- *   - Not logged in: show Client ID input + one-click authorize button
+ *   - Not logged in: show one-click login button (uses built-in App ID)
  *   - Logged in: show user info + logout + check connection
+ *   - Advanced: allow custom App ID / Secret / Redirect URI
  */
 import { Notice, Setting } from 'obsidian'
 import i18n from '~/i18n'
@@ -14,6 +15,13 @@ import BaseSettings from './settings.base'
 const ALIPAN_DEFAULT_AUTH_BASE = 'https://openapi.alipan.com'
 const ALIPAN_DEFAULT_REDIRECT_URI = 'obsidian://alipan-sync/oauth'
 const ALIPAN_SCOPES = 'user:base,file:all:read,file:all:write'
+
+/**
+ * Built-in default App ID for Obsidian Alipan Sync.
+ * Users can override this in Advanced Configuration if they prefer their own app.
+ */
+export const ALIPAN_DEFAULT_CLIENT_ID = '717cbc119af349399f525555efb434e1'
+export const ALIPAN_DEFAULT_CLIENT_SECRET = '0743bd65f7384d5c878f564de7d7276a'
 
 export default class AlipanAccountSettings extends BaseSettings {
 	async display() {
@@ -154,15 +162,82 @@ export default class AlipanAccountSettings extends BaseSettings {
 	// ========================
 
 	private async displayLoginState(alipanSettings: typeof this.plugin.settings.alipan) {
-		// Client ID input — saved to settings so user doesn't have to re-enter
+		// Resolve effective values: use saved custom values or fall back to built-in defaults
 		const savedClientId = alipanSettings?.clientId || ''
-		let clientIdValue = savedClientId
+		const isUsingCustomAppId = savedClientId && savedClientId !== ALIPAN_DEFAULT_CLIENT_ID
+		let clientIdValue = savedClientId || ALIPAN_DEFAULT_CLIENT_ID
 
+		const savedRedirectUri = alipanSettings?.redirectUri || ALIPAN_DEFAULT_REDIRECT_URI
+		let redirectUriValue = savedRedirectUri
+
+		let clientSecretValue = alipanSettings?.clientSecret || ''
+
+		// ---- One-click authorize button (primary action) ----
 		new Setting(this.containerEl)
+			.setName(i18n.t('settings.ssoStatus.notLoggedIn'))
+			.setDesc(i18n.t('settings.alipan.oneClickLoginDesc'))
+			.addButton((button) => {
+				button.setButtonText(i18n.t('settings.login.name'))
+				button.setCta()
+
+				// Wrap button in <a target="_blank"> for OAuth flow
+				const anchor = document.createElement('a')
+				anchor.target = '_blank'
+				button.buttonEl.parentElement?.appendChild(anchor)
+				anchor.appendChild(button.buttonEl)
+
+				// Build the OAuth URL
+				const updateHref = () => {
+					const baseUrl = alipanSettings?.authBaseUrl || ALIPAN_DEFAULT_AUTH_BASE
+					anchor.href =
+						`${baseUrl}/oauth/authorize?` +
+						`client_id=${encodeURIComponent(clientIdValue)}&` +
+						`redirect_uri=${encodeURIComponent(redirectUriValue)}&` +
+						`response_type=code&` +
+						`scope=${encodeURIComponent(ALIPAN_SCOPES)}`
+				}
+				updateHref()
+
+				// Intercept click to save settings before navigating
+				anchor.addEventListener('click', () => {
+					this.ensureAlipanSettings({
+						clientId: clientIdValue,
+						clientSecret: clientSecretValue || undefined,
+						redirectUri: redirectUriValue,
+					})
+					this.plugin.saveSettings()
+					updateHref()
+				})
+
+				// Refresh URL periodically in case user changes fields in advanced config
+				const timer = window.setInterval(() => {
+					if (document.contains(anchor)) {
+						updateHref()
+					} else {
+						window.clearInterval(timer)
+					}
+				}, 2000)
+			})
+
+		// ---- Advanced: custom App ID / Secret / Token config (collapsed) ----
+		const advancedDetails = this.containerEl.createEl('details')
+		advancedDetails.createEl('summary', {
+			text: i18n.t('settings.alipan.advancedConfig'),
+			cls: 'setting-item-name',
+		})
+		advancedDetails.style.marginTop = '1em'
+		advancedDetails.style.cursor = 'pointer'
+
+		const advancedContainer = advancedDetails.createDiv()
+		advancedContainer.style.paddingTop = '0.5em'
+
+		// Custom App ID
+		new Setting(advancedContainer)
 			.setName(i18n.t('settings.alipan.appId'))
 			.setDesc(
 				createFragment((frag) => {
-					frag.appendText(i18n.t('settings.alipan.appIdDesc'))
+					frag.appendText(i18n.t('settings.alipan.appIdDescWithDefault'))
+					frag.createEl('br')
 					const link = frag.createEl('a', {
 						href: 'https://www.yuque.com/aliyundrive/zpfszx',
 						text: i18n.t('settings.alipan.appIdHowTo'),
@@ -172,27 +247,24 @@ export default class AlipanAccountSettings extends BaseSettings {
 			)
 			.addText((text) => {
 				text
-					.setPlaceholder(i18n.t('settings.alipan.appIdPlaceholder'))
-					.setValue(clientIdValue)
+					.setPlaceholder(i18n.t('settings.alipan.appIdPlaceholderDefault'))
+					.setValue(isUsingCustomAppId ? savedClientId : '')
 					.onChange(async (value) => {
-						clientIdValue = value.trim()
-						// Persist immediately so the OAuth callback can find it
-						this.ensureAlipanSettings({ clientId: clientIdValue })
+						const trimmed = value.trim()
+						clientIdValue = trimmed || ALIPAN_DEFAULT_CLIENT_ID
+						this.ensureAlipanSettings({ clientId: clientIdValue, redirectUri: redirectUriValue })
 						await this.plugin.saveSettings()
 					})
 			})
 
-		// Redirect URI input — must match the one configured in Alipan Developer Console
-		const savedRedirectUri = alipanSettings?.redirectUri || ALIPAN_DEFAULT_REDIRECT_URI
-		let redirectUriValue = savedRedirectUri
-
-		const redirectUriSetting = new Setting(this.containerEl)
-			.setName('授权回调 URI (Redirect URI)')
+		// Redirect URI
+		const redirectUriSetting = new Setting(advancedContainer)
+			.setName(i18n.t('settings.alipan.redirectUri'))
 			.setDesc(
 				createFragment((frag) => {
-					frag.appendText('必须与阿里云盘开放平台「授权回调URI」完全一致。')
+					frag.appendText(i18n.t('settings.alipan.redirectUriDesc'))
 					frag.createEl('br')
-					frag.appendText('默认值: ')
+					frag.appendText(i18n.t('settings.alipan.redirectUriDefault'))
 					const code = frag.createEl('code')
 					code.textContent = ALIPAN_DEFAULT_REDIRECT_URI
 				}),
@@ -205,7 +277,6 @@ export default class AlipanAccountSettings extends BaseSettings {
 						redirectUriValue = value.trim() || ALIPAN_DEFAULT_REDIRECT_URI
 						this.ensureAlipanSettings({ clientId: clientIdValue, redirectUri: redirectUriValue })
 						await this.plugin.saveSettings()
-						// Update hint text
 						updateRedirectHint()
 					})
 				text.inputEl.style.width = '100%'
@@ -231,76 +302,7 @@ export default class AlipanAccountSettings extends BaseSettings {
 		}
 		updateRedirectHint()
 
-		// ---- One-click authorize button ----
-		new Setting(this.containerEl)
-			.setName(i18n.t('settings.ssoStatus.notLoggedIn'))
-			.addButton((button) => {
-				button.setButtonText(i18n.t('settings.login.name'))
-				button.setCta()
-
-				// Wrap button in <a target="_blank"> for OAuth flow
-				const anchor = document.createElement('a')
-				anchor.target = '_blank'
-				button.buttonEl.parentElement?.appendChild(anchor)
-				anchor.appendChild(button.buttonEl)
-
-				// Build the OAuth URL
-				const updateHref = () => {
-					if (!clientIdValue) {
-						anchor.removeAttribute('href')
-						return
-					}
-					const baseUrl = alipanSettings?.authBaseUrl || ALIPAN_DEFAULT_AUTH_BASE
-					anchor.href =
-						`${baseUrl}/oauth/authorize?` +
-						`client_id=${encodeURIComponent(clientIdValue)}&` +
-						`redirect_uri=${encodeURIComponent(redirectUriValue)}&` +
-						`response_type=code&` +
-						`scope=${encodeURIComponent(ALIPAN_SCOPES)}`
-				}
-				updateHref()
-
-				// Also intercept click to validate & save first
-				anchor.addEventListener('click', (e) => {
-					if (!clientIdValue) {
-						e.preventDefault()
-						new Notice('请先输入 App ID')
-						return
-					}
-					// Ensure settings are saved before navigating
-					this.ensureAlipanSettings({
-						clientId: clientIdValue,
-						redirectUri: redirectUriValue,
-					})
-					this.plugin.saveSettings()
-					updateHref()
-				})
-
-				// Refresh URL periodically in case user changes fields
-				const timer = window.setInterval(() => {
-					if (document.contains(anchor)) {
-						updateHref()
-					} else {
-						window.clearInterval(timer)
-					}
-				}, 2000)
-			})
-
-		// ---- Advanced: manual token config (collapsed) ----
-		const advancedDetails = this.containerEl.createEl('details')
-		advancedDetails.createEl('summary', {
-			text: '高级配置',
-			cls: 'setting-item-name',
-		})
-		advancedDetails.style.marginTop = '1em'
-		advancedDetails.style.cursor = 'pointer'
-
-		const advancedContainer = advancedDetails.createDiv()
-		advancedContainer.style.paddingTop = '0.5em'
-
-		// Client Secret (optional, most desktop apps don't need it)
-		let clientSecretValue = alipanSettings?.clientSecret || ''
-
+		// Client Secret (optional)
 		new Setting(advancedContainer)
 			.setName(i18n.t('settings.alipan.appSecret'))
 			.setDesc(i18n.t('settings.alipan.appSecretDesc'))
@@ -320,14 +322,15 @@ export default class AlipanAccountSettings extends BaseSettings {
 				text.inputEl.type = 'password'
 			})
 
+		// Manual token input section
 		let refreshTokenValue = ''
 		let driveIdValue = ''
 
 		new Setting(advancedContainer)
 			.setName('Refresh Token')
-			.setDesc('手动输入 Refresh Token')
+			.setDesc(i18n.t('settings.alipan.refreshTokenDesc'))
 			.addText((text) => {
-				text.setPlaceholder('输入 Refresh Token').onChange((value) => {
+				text.setPlaceholder(i18n.t('settings.alipan.refreshTokenPlaceholder')).onChange((value) => {
 					refreshTokenValue = value
 				})
 				text.inputEl.type = 'password'
@@ -335,9 +338,9 @@ export default class AlipanAccountSettings extends BaseSettings {
 
 		new Setting(advancedContainer)
 			.setName('Drive ID')
-			.setDesc('云盘空间 ID')
+			.setDesc(i18n.t('settings.alipan.driveIdDesc'))
 			.addText((text) => {
-				text.setPlaceholder('输入 Drive ID').onChange((value) => {
+				text.setPlaceholder(i18n.t('settings.alipan.driveIdPlaceholder')).onChange((value) => {
 					driveIdValue = value
 				})
 			})

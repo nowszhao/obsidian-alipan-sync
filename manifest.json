@@ -1,7 +1,7 @@
 {
 	"id": "alipan-sync",
 	"name": "Alipan Sync",
-	"version": "1.1.4",
+	"version": "1.1.5",
 	"minAppVersion": "1.0.0",
 	"description": "Sync your vault with Alipan (阿里云盘).",
 	"author": "nowszhao",

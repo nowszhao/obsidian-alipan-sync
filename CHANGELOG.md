@@ -10,6 +10,16 @@
 > 0.8.0 之前的版本包含原始坚果云实现的引用。
 > 从 0.8.x 开始，后端迁移至阿里云盘开放 API。
 
+## [1.1.5] - 2026-04-13
+
+- 优化：简化登录流程，内置默认 App ID，用户无需手动填写 App ID 和 App Secret 即可一键登录。
+- 优化：将 App ID、Redirect URI、App Secret 等配置移入「高级配置」折叠区域，保持界面简洁。
+- 优化：OAuth 回调和客户端初始化自动回退使用内置默认 App ID。
+- Improve: Simplify login flow with a built-in default App ID — users can now log in with one click without manually entering App ID or App Secret.
+- Improve: Move App ID, Redirect URI, and App Secret to a collapsible "Advanced Configuration" section for a cleaner UI.
+- Improve: OAuth callback and client initialization automatically fall back to the built-in default App ID.
+
+
 ## [1.1.4] - 2026-04-13
 
 - 修复：处理阿里云盘回收站中的文件，下载时自动从缓存中移除回收站文件，避免后续同步重试失败。

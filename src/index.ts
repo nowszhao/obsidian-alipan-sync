@@ -27,6 +27,7 @@ import {
 	setPluginInstance,
 	SyncMode,
 } from './settings'
+import { ALIPAN_DEFAULT_CLIENT_ID, ALIPAN_DEFAULT_CLIENT_SECRET } from './settings/alipan-account'
 import { ConflictStrategy } from './sync/tasks/conflict-resolve.task'
 import { GlobMatchOptions } from './utils/glob-match'
 import logger from './utils/logger'
@@ -96,8 +97,8 @@ export default class AlipanSyncPlugin extends Plugin {
 			)
 			const client = new AlipanClient(
 				{
-					clientId: alipanSettings.clientId,
-					clientSecret: alipanSettings.clientSecret,
+					clientId: alipanSettings.clientId || ALIPAN_DEFAULT_CLIENT_ID,
+					clientSecret: alipanSettings.clientSecret || ALIPAN_DEFAULT_CLIENT_SECRET,
 					apiBaseUrl: alipanSettings.apiBaseUrl || 'https://openapi.alipan.com',
 					authBaseUrl: alipanSettings.authBaseUrl || 'https://openapi.alipan.com',
 					driveId: alipanSettings.driveId,
@@ -213,11 +214,20 @@ export default class AlipanSyncPlugin extends Plugin {
 	 */
 	private async handleAlipanOAuthCallback(code: string) {
 		try {
-			const alipanSettings = this.settings.alipan
-			if (!alipanSettings?.clientId) {
-				new Notice(i18n.t('settings.checkConnection.failure') + ': 请先配置阿里云盘 App ID')
-				return
+			// Ensure alipan settings exist, using default client ID if not configured
+			if (!this.settings.alipan) {
+				this.settings.alipan = {
+					clientId: ALIPAN_DEFAULT_CLIENT_ID,
+					clientSecret: ALIPAN_DEFAULT_CLIENT_SECRET,
+					driveId: '',
+					accessToken: '',
+					refreshToken: '',
+					expiresAt: 0,
+				}
 			}
+			const alipanSettings = this.settings.alipan
+			// Use default client ID if none is set
+			const clientId = alipanSettings.clientId || ALIPAN_DEFAULT_CLIENT_ID
 
 			const requestUrlModule = await import('./utils/request-url')
 			const requestUrl = requestUrlModule.default
@@ -228,12 +238,10 @@ export default class AlipanSyncPlugin extends Plugin {
 				: 'https://openapi.alipan.com/oauth/access_token'
 
 			const tokenBody: Record<string, string> = {
-				client_id: alipanSettings.clientId,
+				client_id: clientId,
+				client_secret: alipanSettings.clientSecret || ALIPAN_DEFAULT_CLIENT_SECRET,
 				grant_type: 'authorization_code',
 				code,
-			}
-			if (alipanSettings.clientSecret) {
-				tokenBody.client_secret = alipanSettings.clientSecret
 			}
 
 			const response = await requestUrl({
@@ -289,6 +297,7 @@ export default class AlipanSyncPlugin extends Plugin {
 			// Save tokens to settings
 			this.settings.alipan = {
 				...alipanSettings,
+				clientId,
 				accessToken: data.access_token,
 				refreshToken: data.refresh_token,
 				expiresAt: Date.now() + (data.expires_in || 7200) * 1000,

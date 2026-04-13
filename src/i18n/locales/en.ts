@@ -118,8 +118,11 @@ export default {
 		alipan: {
 			appId: 'App ID (Client ID)',
 			appIdDesc: 'App ID from Alipan Open Platform.',
+			appIdDescWithDefault: 'Optional. Leave empty to use the built-in App ID. Fill in your own if you prefer.',
 			appIdHowTo: 'How to get it?',
 			appIdPlaceholder: 'Enter App ID',
+			appIdPlaceholderDefault: 'Leave empty to use built-in default',
+			oneClickLoginDesc: 'Click Login to authorize with your Alipan account and start syncing.',
 			redirectUri: 'Redirect URI',
 			redirectUriDesc:
 				'Must match the "Redirect URI" configured on Alipan Open Platform exactly.',

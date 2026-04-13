@@ -78,8 +78,11 @@ export default {
 		alipan: {
 			appId: 'App ID (Client ID)',
 			appIdDesc: '阿里云盘开放平台的 App ID。',
+			appIdDescWithDefault: '可选。留空则使用插件内置的 App ID。如需使用自己的应用，请在此填入。',
 			appIdHowTo: '如何获取？',
 			appIdPlaceholder: '输入 App ID',
+			appIdPlaceholderDefault: '留空使用内置默认值',
+			oneClickLoginDesc: '点击登录按钮，使用阿里云盘账号授权即可开始同步。',
 			redirectUri: '授权回调 URI (Redirect URI)',
 			redirectUriDesc: '必须与阿里云盘开放平台「授权回调URI」完全一致。',
 			redirectUriDefault: '默认值: ',
