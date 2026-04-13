@@ -10,6 +10,14 @@
 > 0.8.0 之前的版本包含原始坚果云实现的引用。
 > 从 0.8.x 开始，后端迁移至阿里云盘开放 API。
 
+## [1.1.4] - 2026-04-13
+
+- 修复：处理阿里云盘回收站中的文件，下载时自动从缓存中移除回收站文件，避免后续同步重试失败。
+- 修复：遍历目录时跳过已被移入回收站的文件，防止同步异常。
+- Fix: Handle files in Alipan recycle bin — automatically remove them from the path resolver cache on download failure to prevent retry errors in subsequent syncs.
+- Fix: Skip trashed items when traversing directories to prevent sync anomalies.
+
+
 ## [1.1.3] - 2026-02-14
 
 - 优化了设置访问的稳定性和错误处理。

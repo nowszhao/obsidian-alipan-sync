@@ -190,6 +190,12 @@ export class AlipanRemoteStorage extends RemoteStorage {
 			// Download the file
 			return await this.client.downloadFromUrl(downloadResult.url)
 		} catch (e) {
+			// Handle file in recycle bin error — remove from path resolver cache
+			// so it won't be retried in subsequent syncs
+			if (e instanceof Error && e.message.includes('ForbiddenFileInTheRecycleBin')) {
+				logger.warn(`Alipan: file is in recycle bin, removing from cache: ${remotePath}`)
+				this.pathResolver.remove(remotePath)
+			}
 			logger.error('Alipan getFileContents error:', e)
 			throw e
 		}
@@ -371,6 +377,12 @@ export class AlipanRemoteStorage extends RemoteStorage {
 			})
 
 			for (const item of result.items) {
+				// Skip files that are in the recycle bin
+				if (item.trashed) {
+					logger.debug(`Alipan: skipping trashed item: ${item.name} (file_id=${item.file_id})`)
+					continue
+				}
+
 				const itemPath = remotePath === '/'
 					? '/' + item.name
 					: remotePath + '/' + item.name
