@@ -10,6 +10,14 @@
 > 0.8.0 之前的版本包含原始坚果云实现的引用。
 > 从 0.8.x 开始，后端迁移至阿里云盘开放 API。
 
+## [1.1.6] - 2026-04-28
+
+- 修复：多端同步（两台 Mac + 手机）场景下，当一端覆盖文件后另一端仍持有旧 file_id 缓存，导致下载时报 `ForbiddenFileInTheRecycleBin (403)` 错误，需等待下次同步才能自愈。现在遇到此错误会自动刷新父目录缓存并当次重试成功。
+- 修复：`stat()` 在检测到文件已被移入回收站时，会主动刷新缓存并返回最新 file_id 对应的状态，避免误判。
+- Fix: In multi-device sync scenarios (e.g. two Macs + phone), when one device overwrote a file, other devices still holding the stale `file_id` in their path-resolver cache would hit a `ForbiddenFileInTheRecycleBin (403)` error on download and only recover on the next sync cycle. Now the cache is refreshed from the parent directory and the request is retried within the same sync run.
+- Fix: `stat()` now detects trashed files proactively, refreshes the cache, and returns the state for the latest non-trashed `file_id`.
+
+
 ## [1.1.5] - 2026-04-13
 
 - 优化：简化登录流程，内置默认 App ID，用户无需手动填写 App ID 和 App Secret 即可一键登录。
