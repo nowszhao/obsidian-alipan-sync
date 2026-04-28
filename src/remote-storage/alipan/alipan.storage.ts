@@ -175,29 +175,98 @@ export class AlipanRemoteStorage extends RemoteStorage {
 		remotePath: string,
 		_options?: DownloadOptions,
 	): Promise<RemoteBufferLike> {
+		// Retry once if the cached file_id points to a trashed file.
+		// This happens in multi-device sync: device A overwrote the file
+		// (old file_id → trash, new file_id created), but device B still
+		// has the old file_id in its resolver cache.
+		const maxAttempts = 2
+		let lastError: unknown
+
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			try {
+				const fileId = await this.pathResolver.resolve(remotePath)
+				if (!fileId) {
+					throw new Error(`File not found: ${remotePath}`)
+				}
+
+				// Get download URL
+				const downloadResult = await this.client.getDownloadUrl({
+					drive_id: this.client.driveId,
+					file_id: fileId,
+				})
+
+				// Download the file
+				return await this.client.downloadFromUrl(downloadResult.url)
+			} catch (e) {
+				lastError = e
+				const isRecycleBinError =
+					e instanceof Error &&
+					e.message.includes('ForbiddenFileInTheRecycleBin')
+
+				if (isRecycleBinError && attempt < maxAttempts) {
+					// Stale cache detected — evict and re-resolve by walking
+					// the parent directory, which will pick up the new file_id.
+					logger.warn(
+						`Alipan: stale file_id points to recycle bin, refreshing cache and retrying: ${remotePath}`,
+					)
+					this.pathResolver.remove(remotePath)
+					// Force re-resolution by listing the parent directory,
+					// which updates resolver with the current (non-trashed) file_id.
+					await this.refreshFileIdFromParent(remotePath)
+					continue
+				}
+
+				// Final failure — clean cache so future syncs don't hit the same stale id
+				if (isRecycleBinError) {
+					this.pathResolver.remove(remotePath)
+				}
+				logger.error('Alipan getFileContents error:', e)
+				throw e
+			}
+		}
+
+		// Unreachable, but TypeScript needs it
+		throw lastError instanceof Error
+			? lastError
+			: new Error(`Failed to get file contents: ${remotePath}`)
+	}
+
+	/**
+	 * Re-list the parent directory to refresh the cached file_id for remotePath.
+	 * Used when the cached file_id is stale (e.g. points to a trashed file
+	 * because another device overwrote the file).
+	 */
+	private async refreshFileIdFromParent(remotePath: string): Promise<void> {
 		try {
-			const fileId = await this.pathResolver.resolve(remotePath)
-			if (!fileId) {
-				throw new Error(`File not found: ${remotePath}`)
+			const parentPath = dirname(remotePath)
+			const fileName = basename(remotePath)
+			const parentFileId = await this.pathResolver.resolve(parentPath)
+			if (!parentFileId) {
+				return
 			}
 
-			// Get download URL
-			const downloadResult = await this.client.getDownloadUrl({
-				drive_id: this.client.driveId,
-				file_id: fileId,
-			})
-
-			// Download the file
-			return await this.client.downloadFromUrl(downloadResult.url)
+			let marker = ''
+			do {
+				const result = await this.client.listFile({
+					drive_id: this.client.driveId,
+					parent_file_id: parentFileId,
+					limit: 100,
+					marker: marker || undefined,
+				})
+				for (const item of result.items) {
+					if (item.trashed) continue
+					if (item.name === fileName) {
+						this.pathResolver.set(remotePath, item.file_id)
+						return
+					}
+				}
+				marker = result.next_marker
+			} while (marker)
 		} catch (e) {
-			// Handle file in recycle bin error — remove from path resolver cache
-			// so it won't be retried in subsequent syncs
-			if (e instanceof Error && e.message.includes('ForbiddenFileInTheRecycleBin')) {
-				logger.warn(`Alipan: file is in recycle bin, removing from cache: ${remotePath}`)
-				this.pathResolver.remove(remotePath)
-			}
-			logger.error('Alipan getFileContents error:', e)
-			throw e
+			logger.debug(
+				`Alipan: refreshFileIdFromParent failed for ${remotePath}`,
+				e,
+			)
 		}
 	}
 
@@ -228,12 +297,53 @@ export class AlipanRemoteStorage extends RemoteStorage {
 			throw new Error(`File not found: ${remotePath}`)
 		}
 
-		const file = await this.client.getFile({
-			drive_id: this.client.driveId,
-			file_id: fileId,
-		})
+		try {
+			const file = await this.client.getFile({
+				drive_id: this.client.driveId,
+				file_id: fileId,
+			})
 
-		return alipanFileToStatModel(file, remotePath)
+			// File exists but has been moved to recycle bin by another device.
+			// Treat it as "not found" and refresh cache so callers can re-resolve.
+			if (file.trashed) {
+				logger.warn(
+					`Alipan stat: file is in recycle bin, refreshing cache: ${remotePath}`,
+				)
+				this.pathResolver.remove(remotePath)
+				await this.refreshFileIdFromParent(remotePath)
+				const newFileId = this.pathResolver.getFileId(remotePath)
+				if (newFileId) {
+					const refreshed = await this.client.getFile({
+						drive_id: this.client.driveId,
+						file_id: newFileId,
+					})
+					return alipanFileToStatModel(refreshed, remotePath)
+				}
+				throw new Error(`File not found (was in recycle bin): ${remotePath}`)
+			}
+
+			return alipanFileToStatModel(file, remotePath)
+		} catch (e) {
+			if (
+				e instanceof Error &&
+				e.message.includes('ForbiddenFileInTheRecycleBin')
+			) {
+				logger.warn(
+					`Alipan stat: stale file_id → recycle bin, refreshing: ${remotePath}`,
+				)
+				this.pathResolver.remove(remotePath)
+				await this.refreshFileIdFromParent(remotePath)
+				const newFileId = this.pathResolver.getFileId(remotePath)
+				if (newFileId) {
+					const refreshed = await this.client.getFile({
+						drive_id: this.client.driveId,
+						file_id: newFileId,
+					})
+					return alipanFileToStatModel(refreshed, remotePath)
+				}
+			}
+			throw e
+		}
 	}
 
 	// ========================
