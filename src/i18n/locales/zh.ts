@@ -1,6 +1,7 @@
 export default {
 	errors: {
 		filenameUnsupportedChars: '文件 {{path}} 包含不支持的字符：{{chars}}',
+		filenameTooLong: '文件 {{path}} 名称过长（UTF-8 编码超过 1024 字节），无法上传',
 	},
 	settings: {
 		title: '阿里云盘同步设置',

@@ -1,6 +1,6 @@
 import { parse as bytesParse } from 'bytes-iec'
 import { SyncMode } from '~/settings'
-import { hasInvalidChar } from '~/utils/has-invalid-char'
+import { hasFilenameError } from '~/utils/has-invalid-char'
 import { isSameTime } from '~/utils/is-same-time'
 import logger from '~/utils/logger'
 import { remotePathToLocalPath } from '~/utils/remote-path-to-local-path'
@@ -134,7 +134,7 @@ export async function twoWayDecider(
 								continue
 							}
 
-							if (hasInvalidChar(local.path)) {
+							if (hasFilenameError(local.path)) {
 								tasks.push(taskFactory.createFilenameErrorTask(options))
 							} else {
 								tasks.push(
@@ -190,7 +190,7 @@ export async function twoWayDecider(
 								)
 								continue
 							}
-							if (hasInvalidChar(local.path)) {
+							if (hasFilenameError(local.path)) {
 								tasks.push(taskFactory.createFilenameErrorTask(options))
 							} else {
 								tasks.push(taskFactory.createPushTask(options))
@@ -240,7 +240,7 @@ export async function twoWayDecider(
 						)
 						continue
 					}
-					if (hasInvalidChar(local.path)) {
+					if (hasFilenameError(local.path)) {
 						tasks.push(taskFactory.createFilenameErrorTask(options))
 					} else {
 						tasks.push(taskFactory.createPushTask(options))
@@ -283,7 +283,7 @@ export async function twoWayDecider(
 						continue
 					}
 
-					if (hasInvalidChar(local.path)) {
+					if (hasFilenameError(local.path)) {
 						tasks.push(taskFactory.createFilenameErrorTask(options))
 					} else {
 						tasks.push(
@@ -332,7 +332,7 @@ export async function twoWayDecider(
 						)
 						continue
 					}
-					if (hasInvalidChar(local.path)) {
+					if (hasFilenameError(local.path)) {
 						tasks.push(taskFactory.createFilenameErrorTask(options))
 					} else {
 						tasks.push(taskFactory.createPushTask(options))
@@ -477,7 +477,7 @@ export async function twoWayDecider(
 
 				if (localChanged) {
 					logDecision('local folder content changed → mkdir remote', local.path)
-					if (hasInvalidChar(local.path)) {
+					if (hasFilenameError(local.path)) {
 						tasks.push(
 							taskFactory.createFilenameErrorTask({
 								localPath: local.path,
@@ -522,7 +522,7 @@ export async function twoWayDecider(
 				)
 			} else {
 				logDecision('local folder not in remote → mkdir remote', local.path)
-				if (hasInvalidChar(local.path)) {
+				if (hasFilenameError(local.path)) {
 					tasks.push(
 						taskFactory.createFilenameErrorTask({
 							localPath: local.path,

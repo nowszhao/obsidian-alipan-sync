@@ -2,6 +2,8 @@ export default {
 	errors: {
 		filenameUnsupportedChars:
 			'File {{path}} contains unsupported characters: {{chars}}',
+		filenameTooLong:
+			'File {{path}} name is too long (exceeds 1024 bytes in UTF-8), cannot upload',
 	},
 	settings: {
 		language: {
