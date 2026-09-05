@@ -4,6 +4,7 @@ import type RemoteStorage from '~/remote-storage/remote-storage.interface'
 import { SyncRecord } from '~/storage/sync-record'
 import getTaskName from '~/utils/get-task-name'
 import { MaybePromise } from '~/utils/types'
+import { App } from 'obsidian'
 
 export interface BaseTaskOptions {
 	vault: Vault
@@ -13,6 +14,7 @@ export interface BaseTaskOptions {
 	remotePath: string
 	localPath: string
 	syncRecord: SyncRecord
+	app?:App
 }
 
 interface TaskSuccessResult {

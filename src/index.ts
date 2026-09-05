@@ -25,7 +25,7 @@ import {
 	SyncMode,
 } from './settings'
 import { ALIPAN_DEFAULT_CLIENT_ID, ALIPAN_DEFAULT_CLIENT_SECRET } from './settings/alipan-account'
-import { ConflictStrategy } from './sync/tasks/conflict-resolve.task'
+import { ConflictStrategy,NonMarkdownConflictStrategy } from './sync/tasks/conflict-resolve.task'
 import { GlobMatchOptions } from './utils/glob-match'
 import logger from './utils/logger'
 import { stdRemotePath } from './utils/std-remote-path'
@@ -152,9 +152,11 @@ export default class AlipanSyncPlugin extends Plugin {
 			remoteCacheDir: '',
 			useGitStyle: false,
 			conflictStrategy: ConflictStrategy.DiffMatchPatch,
-			confirmBeforeSync: true,
+			nonMarkdownConflictStrategy : NonMarkdownConflictStrategy.LatestTimeStamp,
+			confirmBeforeSync: true, 
 			confirmBeforeDeleteInAutoSync: true,
 			syncMode: SyncMode.LOOSE,
+			contentHashLimitMB: 100,
 			filterRules: {
 				exclusionRules: [
 					'**/.git',

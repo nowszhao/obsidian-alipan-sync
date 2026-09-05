@@ -85,6 +85,12 @@ export default {
 			strict: 'Strict',
 			loose: 'Loose',
 		},
+		nonMarkdownConflict: {
+			name: 'Non-Markdown conflict strategy',
+			desc: 'How to handle binary files modified on both sides',
+			latestTimestamp: 'Latest timestamp (auto)',
+			manual: 'Choose manually which to keep',
+			},
 		startupSyncDelay: {
 			name: 'Auto-sync on startup',
 			desc: 'Set the number of seconds after startup to automatically perform a sync. Set to 0 to disable auto-sync on startup.',
@@ -281,6 +287,10 @@ export default {
 				deleteError: 'Error deleting cache file: {{message}}',
 			},
 		},
+		contentHashLimit: {
+			name: 'Content hash size limit (MB)',
+			desc: 'Local files larger than this (MB) skip content hashing for conflict detection. Default 100. Lower it if sync is slow.',
+		},
 	},
 	sync: {
 		failed: 'Sync failed!',
@@ -397,5 +407,22 @@ export default {
 		hoursAgo: '{{count}}h ago',
 		daysAgo: '{{count}}d ago',
 		longAgo: 'long ago',
+	},
+	conflictResolve: {
+		title: 'Non-Markdown file conflict',
+		instruction: 'This binary file was modified on both local and cloud and cannot be merged automatically. Choose which version to keep:',
+		localColumn: 'Local',
+		remoteColumn: 'Cloud',
+		useLocal: 'Keep local',
+		useRemote: 'Keep cloud',
+		skip: 'Skip (handle later)',
+		pathColumn: 'Path',
+		createdColumn: 'Created',
+		modifiedColumn: 'Modified',
+		sizeColumn: 'Size',
+		hashColumn: 'Content hash',
+		hashSame: 'Both versions have identical content, only metadata differs. Either side is safe to keep.',
+		hashDiff: 'Contents are different. Confirm which version to keep.',
+		hashMissing: 'Large file skipped content verification; judge by time/size.',
 	},
 }

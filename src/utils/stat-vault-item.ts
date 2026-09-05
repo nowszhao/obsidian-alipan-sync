@@ -26,6 +26,8 @@ export async function statVaultItem(
 			isDeleted: false,
 			mtime: file.stat.mtime,
 			size: file.stat.size,
+			ctime:file.stat.ctime,
+		
 		}
 	}
 }

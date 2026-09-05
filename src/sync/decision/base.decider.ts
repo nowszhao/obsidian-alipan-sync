@@ -31,4 +31,7 @@ export default abstract class BaseSyncDecider {
 	get remoteBaseDir() {
 		return this.sync.remoteBaseDir
 	}
+	get app() {
+    return this.sync.app
+ 	}
 }

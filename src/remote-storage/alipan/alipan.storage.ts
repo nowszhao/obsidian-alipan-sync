@@ -22,6 +22,8 @@ import RemoteStorage, {
 import { AlipanClient } from './alipan.client'
 import { AlipanPathResolver } from './alipan-path-resolver'
 import { AlipanFile } from './alipan.types'
+import { sha1Hex } from '~/utils/sha256'
+import { get } from 'http'
 
 /**
  * Convert an AlipanFile to StatModel.
@@ -34,6 +36,7 @@ function alipanFileToStatModel(file: AlipanFile, path: string): StatModel {
 			isDir: true,
 			isDeleted: false,
 			mtime: new Date(file.updated_at).getTime(),
+			ctime:new Date(file.created_at).getTime()
 		}
 	}
 	return {
@@ -43,6 +46,8 @@ function alipanFileToStatModel(file: AlipanFile, path: string): StatModel {
 		isDeleted: false,
 		mtime: new Date(file.updated_at).getTime(),
 		size: file.size ?? 0,
+		ctime:new Date(file.created_at).getTime(),
+		contentHash: file.content_hash,
 	}
 }
 
@@ -87,89 +92,83 @@ export class AlipanRemoteStorage extends RemoteStorage {
 	// ========================
 
 	async putFileContents(
-		remotePath: string,
-		content: RemoteBufferLike | string,
-		options?: UploadOptions,
+    remotePath: string,
+    content: RemoteBufferLike | string,
+    options?: UploadOptions,
 	): Promise<boolean> {
 		try {
 			const arrayBuffer = toArrayBuffer(content)
 			const fileName = basename(remotePath)
 			const parentPath = dirname(remotePath)
-
-			// Ensure parent directory exists and get its file_id
 			const parentFileId = await this.pathResolver.resolveOrCreate(parentPath)
+			const existingFileId = await this.pathResolver.resolve(remotePath)
 
-			// If overwrite is requested and the file already exists, delete it first
-			if (options?.overwrite) {
-				const existingFileId = await this.pathResolver.resolve(remotePath)
-				if (existingFileId) {
-					logger.debug(`Alipan: deleting existing file before overwrite: ${remotePath}`)
-					try {
-						await this.client.trashFile({
-							drive_id: this.client.driveId,
-							file_id: existingFileId,
-						})
-						this.pathResolver.remove(remotePath)
-					} catch (deleteErr) {
-						// If delete fails (e.g., file was already deleted), log and continue
-						logger.debug(`Alipan: failed to delete existing file, proceeding with upload: ${remotePath}`, deleteErr)
-					}
-				}
-			}
-
-			// Step 1: Create file (initialize upload)
+			// ① 创建（auto_rename：重名自动改名，旧文件不动 → 失败时旧文件仍在）
 			const createResult = await this.client.createFile({
 				name: fileName,
 				type: 'file',
 				parent_file_id: parentFileId,
 				drive_id: this.client.driveId,
 				size: arrayBuffer.byteLength,
-				check_name_mode: options?.overwrite ? 'refuse' : 'auto_rename',
+				content_hash: await sha1Hex(arrayBuffer),
+				content_hash_name: 'sha1',
+				check_name_mode: 'auto_rename',
 				part_info_list: [{ part_number: 1 }],
 			})
 
-			// If rapid upload succeeded, no need to actually upload
-			if (createResult.rapid_upload) {
-				this.pathResolver.set(remotePath, createResult.file_id)
-				return true
-			}
-
-			// Step 2: Upload content to the upload URL
-			if (
-				createResult.part_info_list &&
-				createResult.part_info_list.length > 0
-			) {
-				const uploadUrl = createResult.part_info_list[0].upload_url
-				if (uploadUrl) {
-					await this.client.uploadPartContent(uploadUrl, arrayBuffer)
-				} else {
-					logger.error(`Alipan: no upload_url in createFile response for ${remotePath}`)
-					throw new Error(`No upload URL provided by Alipan API for ${remotePath}`)
+			// ② 秒传未命中 → 上传分片 + complete
+			if (!createResult.rapid_upload) {
+				if (createResult.part_info_list && createResult.part_info_list.length > 0) {
+					const uploadUrl = createResult.part_info_list[0].upload_url
+					if (uploadUrl) {
+						await this.client.uploadPartContent(uploadUrl, arrayBuffer)
+					} else {
+						throw new Error(`No upload URL provided by Alipan API for ${remotePath}`)
+					}
+				} else if (createResult.upload_id) {
+					throw new Error(`Unexpected createFile response: upload_id without part_info_list for ${remotePath}`)
 				}
-			} else if (!createResult.rapid_upload && createResult.upload_id) {
-				// createFile returned upload_id but no part_info_list — this shouldn't happen
-				logger.error(`Alipan: createFile returned upload_id but no part_info_list for ${remotePath}`)
-				throw new Error(`Unexpected createFile response: upload_id without part_info_list for ${remotePath}`)
+				if (createResult.upload_id) {
+					await this.client.completeFile({
+						drive_id: this.client.driveId,
+						file_id: createResult.file_id,
+						upload_id: createResult.upload_id,
+					})
+				}
 			}
 
-			// Step 3: Complete the upload
-			if (createResult.upload_id) {
-				await this.client.completeFile({
+			// ③ 创建成功后删除旧文件（existingFileId 为 null 则跳过）
+			if (existingFileId) {
+				try {
+					await this.client.trashFile({ drive_id: this.client.driveId, file_id: existingFileId })
+					this.pathResolver.remove(remotePath)
+				} catch (deleteErr) {
+					logger.debug(`Alipan: failed to delete existing file: ${remotePath}`, deleteErr)
+					// trash 失败 → 旧文件仍在 → 下面 move 的 refuse 会撞名失败 → 任务失败、旧文件保留（安全方向）
+				}
+			}
+
+			// ④ 旧文件存在 → auto_rename 必然已改名 → move 回原名（秒传与否都执行）
+			if (existingFileId) {
+				await this.client.moveFile({
 					drive_id: this.client.driveId,
 					file_id: createResult.file_id,
-					upload_id: createResult.upload_id,
+					to_parent_file_id: parentFileId,
+					new_name: fileName,
+					check_name_mode: 'refuse',
 				})
 			}
 
-			// Update path resolver cache
+			// ⑤ 统一更新缓存
 			this.pathResolver.set(remotePath, createResult.file_id)
-
 			return true
 		} catch (e) {
 			logger.error(`Alipan putFileContents error: ${remotePath}`, e)
 			throw e
 		}
 	}
+			
+
 
 	async getFileContents(
 		remotePath: string,
@@ -196,29 +195,27 @@ export class AlipanRemoteStorage extends RemoteStorage {
 				})
 
 				// Download the file
-				return await this.client.downloadFromUrl(downloadResult.url)
+				return await this.client.downloadFromUrl({downloadUrl:downloadResult.url})
 			} catch (e) {
 				lastError = e
-				const isRecycleBinError =
+				// stale file_id：file_id 指向已回收站/已失效文件。
+				// 多设备 overwrite 或 rename 失败残留后常见；PDS 可能返回
+				// ForbiddenFileInTheRecycleBin / FileNotFound 等多种错误码，需一并识别。
+				const isStaleIdError =
 					e instanceof Error &&
-					e.message.includes('ForbiddenFileInTheRecycleBin')
+					(e.message.includes('ForbiddenFileInTheRecycleBin') ||
+						/FileNot(Foun|Exist)|NotFound|file not found|file not exist/i.test(e.message))
 
-				if (isRecycleBinError && attempt < maxAttempts) {
-					// Stale cache detected — evict and re-resolve by walking
-					// the parent directory, which will pick up the new file_id.
-					logger.warn(
-						`Alipan: stale file_id points to recycle bin, refreshing cache and retrying: ${remotePath}`,
-					)
+				if (isStaleIdError) {
 					this.pathResolver.remove(remotePath)
-					// Force re-resolution by listing the parent directory,
-					// which updates resolver with the current (non-trashed) file_id.
-					await this.refreshFileIdFromParent(remotePath)
-					continue
-				}
-
-				// Final failure — clean cache so future syncs don't hit the same stale id
-				if (isRecycleBinError) {
-					this.pathResolver.remove(remotePath)
+					if (attempt < maxAttempts) {
+						logger.warn(
+							`Alipan: stale file_id for ${remotePath}, refreshing cache and retrying`,
+						)
+						await this.refreshFileIdFromParent(remotePath)
+						continue
+					}
+					// 最后一次仍失败：refresh 也找不到非 trashed 同名文件 → 真不存在，抛原始错误
 				}
 				logger.error('Alipan getFileContents error:', e)
 				throw e
@@ -484,6 +481,7 @@ export class AlipanRemoteStorage extends RemoteStorage {
 				marker: marker || undefined,
 				order_by: 'name',
 				order_direction: 'ASC',
+				fields:'content_hash'
 			})
 
 			for (const item of result.items) {

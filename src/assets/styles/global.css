@@ -181,3 +181,16 @@ input.success {
 .alipan-text-warning {
 	color: var(--text-warning);
 }
+
+.conflict-table {
+	width: 100%;
+	border-collapse: collapse;
+	margin: 1em 0;
+}
+.conflict-table td {
+	padding: 6px 8px;
+	border: 1px solid var(--background-modifier-border);
+	text-align: left;
+	vertical-align: middle;
+	white-space: nowrap;
+}

@@ -14,6 +14,9 @@ import {
 	resolveByLatestTimestamp,
 } from '../core/merge-utils'
 import { BaseTask, BaseTaskOptions, toTaskError } from './task.interface'
+import ConflictResolveModal from '~/components/ConflictResolveModal'
+import { localFileSha1 } from '~/utils/content-hash'
+import { useSettings } from '~/settings'   // ← 顶部加
 
 export enum ConflictStrategy {
 	DiffMatchPatch = 'diff-match-patch',
@@ -21,7 +24,15 @@ export enum ConflictStrategy {
 	Skip = 'skip',
 }
 
+//非markdown文件冲突解决模式
+//export type NonMarkdownConflictStrategy = nonMarkdownConflictStrategyEnum
+export enum NonMarkdownConflictStrategy
+{ 
+	LatestTimeStamp='latest-timestamp',
+	manual='manual'
+}
 export default class ConflictResolveTask extends BaseTask {
+	resolvedBySkip = false    
 	constructor(
 		public readonly options: BaseTaskOptions & {
 			record?: SyncRecordModel
@@ -29,6 +40,7 @@ export default class ConflictResolveTask extends BaseTask {
 			remoteStat?: StatModel
 			localStat?: StatModel
 			useGitStyle: boolean
+			nonMarkdownStrategy?: NonMarkdownConflictStrategy
 		},
 	) {
 		super(options)
@@ -62,15 +74,35 @@ export default class ConflictResolveTask extends BaseTask {
 				return { success: true } as const
 			}
 
-			switch (this.options.strategy) {
-				case ConflictStrategy.DiffMatchPatch:
-					return await this.execIntelligentMerge()
-				case ConflictStrategy.LatestTimeStamp:
-					return await this.execLatestTimeStamp(local, remote)
-				case ConflictStrategy.Skip:
-					// Skip conflict resolution - keep files as they are
-					// Don't update record to preserve conflict state for next sync
-					return { success: true, skipRecord: true } as const
+			// 非 markdown 冲突 + manual 设置：独立于 conflictStrategy 触发弹窗
+			if (!isMergeablePath(this.localPath) || !isMergeablePath(this.remotePath))
+			{
+				switch(this.options.nonMarkdownStrategy){
+					case  NonMarkdownConflictStrategy.manual  :
+						return await this.execManualResolve(local, remote)
+					case NonMarkdownConflictStrategy.LatestTimeStamp :
+						return await this.execLatestTimeStamp(local,remote)
+					default:
+						// 未设置（undefined）时默认时间戳兜底
+						return await this.execLatestTimeStamp(local, remote)
+				}
+			}else
+			{
+				
+				switch (this.options.strategy) {
+					case ConflictStrategy.DiffMatchPatch:
+						return await this.execIntelligentMerge()					
+					case ConflictStrategy.LatestTimeStamp:
+						return await this.execLatestTimeStamp(local, remote)
+					case ConflictStrategy.Skip:
+						// Skip conflict resolution - keep files as they are
+						// Don't update record to preserve conflict state for next sync
+						return { success: true, skipRecord: true } as const		
+					default:
+						// 理论上不可达，兜底
+						return await this.execLatestTimeStamp(local, remote)			
+
+				}
 			}
 		} catch (e) {
 			logger.error(this, e)
@@ -254,6 +286,77 @@ export default class ConflictResolveTask extends BaseTask {
 			}
 
 			return { success: true } as const
+		} catch (e) {
+			logger.error(this, e)
+			return { success: false, error: toTaskError(e, this) }
+		}
+	}
+
+
+
+	private async execManualResolve(local: StatModel, remote: StatModel) {
+		try {
+			const app = this.options.app
+			if (!app) {
+				// 无 app（异常注入链）兜底：降级时间戳，避免永久失败
+				return await this.execLatestTimeStamp(local, remote)
+			}
+			const { contentHashLimitMB } = await useSettings()
+			let localHash: string | undefined
+			const localFile = this.vault.getFileByPath(this.localPath)
+			const remoteFile = this.vault.getFileByPath(this.remotePath)
+			if (localFile && localFile?.stat.size!=remoteFile?.stat.size ) {
+				localHash = await localFileSha1(this.vault, localFile,
+				contentHashLimitMB*1024*1024,
+				)
+			}
+			// ② 远端 hash：API 免费字段（改动 2 后 StatModel 自带）
+			const remoteHash = remote.contentHash
+
+			const choice = await new ConflictResolveModal(
+				app, this.localPath, this.remotePath,
+				local, remote, localHash, remoteHash,   // ← 追加两个参数
+			).open()
+						
+
+			const file = this.vault.getFileByPath(this.localPath)
+			if (!file) {
+				throw new Error('cannot find file in local fs: ' + this.localPath)
+			}
+
+			if (choice === 'local') {
+				// 保留本地 → push 覆盖远端
+				const localContent = await this.vault.readBinary(file)
+				if (!this.remoteStorage) {
+					throw new Error('Remote storage not available')
+				}
+				await this.remoteStorage.putFileContents(
+					this.remotePath,
+					localContent as RemoteBufferLike,
+					{ overwrite: true },
+				)
+				return { success: true } as const
+			}
+
+
+			if (choice === 'remote') {
+				// 保留远端 → pull 覆盖本地
+				if (!this.remoteStorage) {
+					throw new Error('Remote storage not available')
+				}
+				const remoteContent = await this.remoteStorage.getFileContents(this.remotePath)
+				
+				const arrayBuffer =
+					remoteContent instanceof ArrayBuffer
+						? remoteContent
+						: new Uint8Array(remoteContent).buffer
+				await this.vault.modifyBinary(file, arrayBuffer)
+				return { success: true } as const
+			}
+
+			// skip：保留冲突状态，不更新记录 → 下次同步继续提示，直到用户决定
+			this.resolvedBySkip = true
+			return { success: true, skipRecord: true } as const
 		} catch (e) {
 			logger.error(this, e)
 			return { success: false, error: toTaskError(e, this) }

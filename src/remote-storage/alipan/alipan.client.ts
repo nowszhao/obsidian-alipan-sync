@@ -27,7 +27,7 @@ import {
 	AlipanGetLastCursorResponse,
 	AlipanFile,
 } from './alipan.types'
-
+import { apiLimiter } from '~/utils/api-limiter'
 export interface AlipanAuthState {
 	accessToken: string
 	refreshToken: string
@@ -127,15 +127,14 @@ export class AlipanClient {
 		body?: unknown,
 		options?: { retryOn401?: boolean },
 	): Promise<T> {
-		await this.ensureValidToken()
-
-		// Rate limiting: ensure minimum interval between requests
-		const now = Date.now()
-		const elapsed = now - this.lastRequestTime
-		if (elapsed < DEFAULT_MIN_REQUEST_INTERVAL) {
-			await sleep(DEFAULT_MIN_REQUEST_INTERVAL - elapsed)
-		}
-
+		return apiLimiter.schedule(() => this.doRequest<T>(path, body, options))
+	}
+	private async doRequest<T>(
+    path: string,
+    body?: unknown,
+    options?: { retryOn401?: boolean },
+	): Promise<T> {
+		await this.ensureValidToken()		
 		const requestBody = body ? JSON.stringify(body) : undefined
 		const url = `${this.config.apiBaseUrl}${path}`
 
@@ -253,89 +252,119 @@ export class AlipanClient {
 	// ========================
 
 	async uploadPartContent(
-		uploadUrl: string,
-		content: ArrayBuffer,
+    uploadUrl: string,
+    content: ArrayBuffer,
 	): Promise<void> {
-		// Use fetch() instead of requestUrl() for the OSS PUT upload.
-		//
-		// Reason: On mobile (Android/iOS), Obsidian's requestUrl uses Capacitor's
-		// native HTTP bridge which may auto-add a "Content-Type" header (e.g.
-		// "application/octet-stream") to the PUT request. The upload_url is a
-		// pre-signed OSS URL whose signature was calculated WITHOUT a Content-Type
-		// header. Sending an unexpected Content-Type causes OSS to return
-		// 403 SignatureDoesNotMatch.
-		//
-		// fetch() does NOT auto-add Content-Type for ArrayBuffer bodies, ensuring
-		// the request matches the pre-signed URL's signature on all platforms.
-		// If fetch() fails (e.g. due to CORS), we fall back to requestUrl().
-		for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt++) {
-			let status: number
-			let responseText: string
+    return apiLimiter.schedule(async () => {
+        for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt++) {
+            let status: number
+            let responseText: string
 
-			try {
-				const fetchResponse = await fetch(uploadUrl, {
-					method: 'PUT',
-					body: content,
-				})
-				status = fetchResponse.status
-				responseText = await fetchResponse.text()
-			} catch {
-				// fetch failed (likely CORS on desktop) — fall back to requestUrl
-				logger.warn(
-					'Alipan upload: fetch() failed, falling back to requestUrl()',
-				)
-				const fallbackResponse = await requestUrl({
-					url: uploadUrl,
-					method: 'PUT',
-					body: content,
-					throw: false,
-				})
-				status = fallbackResponse.status
-				responseText = fallbackResponse.text || ''
-			}
+            try {
+                const fetchResponse = await fetch(uploadUrl, {
+                    method: 'PUT',
+                    body: content,
+                })
+                status = fetchResponse.status
+                responseText = await fetchResponse.text()
+            } catch {
+                logger.warn(
+                    'Alipan upload: fetch() failed, falling back to requestUrl()',
+                )
+                const fallbackResponse = await requestUrl({
+                    url: uploadUrl,
+                    method: 'PUT',
+                    body: content,
+                    throw: false,
+                })
+                status = fallbackResponse.status
+                responseText = fallbackResponse.text || ''
+            }
 
-			if (status === 403 && attempt < MAX_429_RETRIES) {
-				// Pre-signed URL signature mismatch or expired — log and retry
-				logger.warn(
-					`Alipan upload part got 403, retrying (attempt ${attempt + 1}/${MAX_429_RETRIES}): ${responseText?.substring(0, 200)}`,
-				)
-				await sleep(1000 * (attempt + 1))
-				continue
-			}
+            // ★ 新增：429 频率限制处理（放在 403 之前）
+            if (status === 429 && attempt < MAX_429_RETRIES) {
+                const waitMs = this.parse429WaitTime(responseText)
+                logger.warn(
+                    `Alipan upload 429, waiting ${waitMs}ms (attempt ${attempt + 1}/${MAX_429_RETRIES})`,
+                )
+                await sleep(waitMs)
+                continue
+            }
 
-			if (status >= 400) {
-				throw new Error(
-					`Alipan upload part failed [${status}]: ${responseText}`,
-				)
-			}
+            if (status === 403 && attempt < MAX_429_RETRIES) {
+                logger.warn(
+                    `Alipan upload part got 403, retrying (attempt ${attempt + 1}/${MAX_429_RETRIES}): ${responseText?.substring(0, 200)}`,
+                )
+                await sleep(1000 * (attempt + 1))
+                continue
+            }
 
-			return // success
-		}
+            if (status >= 400) {
+                throw new Error(
+                    `Alipan upload part failed [${status}]: ${responseText}`,
+                )
+            }
 
-		throw new Error(
-			`Alipan upload part failed: exhausted ${MAX_429_RETRIES} retries on 403 errors`,
-		)
-	}
+            return // success
+        }
+
+        throw new Error(
+            `Alipan upload part failed: exhausted ${MAX_429_RETRIES} retries on 403/429 errors`,
+        )
+    })
+}
 
 	// ========================
 	// Download (GET from download_url)
 	// ========================
 
-	async downloadFromUrl(downloadUrl: string): Promise<ArrayBuffer> {
-		const response = await requestUrl({
-			url: downloadUrl,
-			method: 'GET',
-			throw: false,
-		})
+	async downloadFromUrl({ downloadUrl }: { downloadUrl: string }): Promise<ArrayBuffer> {
+    return apiLimiter.schedule(async () => {
+        const MAX_DOWNLOAD_RETRIES = 3
+        for (let attempt = 0; attempt <= MAX_DOWNLOAD_RETRIES; attempt++) {
+            let response: Awaited<ReturnType<typeof requestUrl>>
+            try {
+                response = await requestUrl({
+                    url: downloadUrl,
+                    method: 'GET',
+                    throw: false,
+                })
+            } catch (e) {
+                // 网络层错误（断连/超时）—— 退避重试
+                if (attempt < MAX_DOWNLOAD_RETRIES) {
+                    logger.warn(
+                        `Alipan download network error, retrying (${attempt + 1}/${MAX_DOWNLOAD_RETRIES}): ${e}`,
+                    )
+                    await sleep(1000 * (attempt + 1))
+                    continue
+                }
+                throw e
+            }
 
-		if (response.status >= 400) {
-			throw new Error(
-				`Alipan download failed [${response.status}]: ${response.text}`,
-			)
-		}
+            if (response.status === 429) {
+                if (attempt < MAX_DOWNLOAD_RETRIES) {
+                    const waitMs = this.parse429WaitTime(response.text)
+                    logger.warn(
+                        `Alipan download 429, waiting ${waitMs}ms before retry (${attempt + 1}/${MAX_DOWNLOAD_RETRIES})`,
+                    )
+                    await sleep(waitMs)
+                    continue
+                }
+            }
 
-		return response.arrayBuffer
-	}
+            if (response.status >= 400) {
+                throw new Error(
+                    `Alipan download failed [${response.status}]: ${response.text}`,
+                )
+            }
+
+            return response.arrayBuffer
+        }
+        throw new Error(
+            `Alipan download failed: exhausted ${MAX_DOWNLOAD_RETRIES} retries`,
+        )
+    })
+}
 
 	// ========================
 	// Delta / Incremental Sync

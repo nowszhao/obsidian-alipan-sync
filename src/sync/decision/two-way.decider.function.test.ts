@@ -95,6 +95,8 @@ import {
 	TaskFactory,
 } from '../decision/sync-decision.interface'
 import { twoWayDecider } from '../decision/two-way.decider.function'
+import NewFolder from 'packages/remote-explorer/dist/components/NewFolder'
+import { NonMarkdownConflictStrategy } from '../tasks/conflict-resolve.task'
 
 /**
  * Helper to build a local file stat
@@ -213,6 +215,7 @@ function createInput(overrides: Partial<SyncDecisionInput>): SyncDecisionInput {
 			conflictStrategy: 'diff-match-patch' as any,
 			useGitStyle: false,
 			syncMode: 'strict' as any,
+			nonMarkdownConflictStrategy: NonMarkdownConflictStrategy.LatestTimeStamp,
 		},
 		localStats: [],
 		remoteStats: [],

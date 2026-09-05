@@ -13,6 +13,7 @@ import {
 } from '../utils/has-ignored-in-folder'
 import { hasFolderContentChanged } from './has-folder-content-changed'
 import { SyncDecisionInput } from './sync-decision.interface'
+import { StatModel } from '~/model/stat.model'
 
 export async function twoWayDecider(
 	input: SyncDecisionInput,
@@ -25,7 +26,9 @@ export async function twoWayDecider(
 		remoteBaseDir,
 		getBaseContent,
 		compareFileContent,
+		compareLocalRemote,
 		taskFactory,
+		
 	} = input
 
 	// Compact decision logger — only logs the reason and path
@@ -38,7 +41,13 @@ export async function twoWayDecider(
 	if (maxFileSizeStr !== '') {
 		maxFileSize = bytesParse(maxFileSizeStr, { mode: 'jedec' }) ?? Infinity
 	}
-
+	const isContentSameOrUndecided = async (
+		local: StatModel,
+		remote: StatModel,
+	): Promise<boolean> => {
+		if (!compareLocalRemote) return true   // 未注入 → 退回 size 猜测（兼容测试）
+		return (await compareLocalRemote(local, remote)) !== false
+	}
 	// Filter out ignored files and extract StatModel from FsWalkResult
 	const localStatsFiltered = localStats
 		.filter((item) => !item.ignored)
@@ -60,12 +69,6 @@ export async function twoWayDecider(
 	)
 
 	// ── Remote-empty protection ──
-	// If remote has no files (may still have empty folders) but we have sync
-	// records AND local files, this likely means the remote storage was wiped /
-	// reset.  Without this guard the decider would interpret every "record exists
-	// + remote gone + local unchanged" file as "remote deleted → delete local",
-	// which is catastrophic.  Treat this situation as a fresh first-sync by
-	// clearing all records so the files are pushed instead.
 	const remoteFileCount = remoteStatsFiltered.filter((s) => !s.isDir).length
 	const localFileCount = localStatsFiltered.filter((s) => !s.isDir).length
 	const fileRecordCount = [...syncRecords.values()].filter(
@@ -91,6 +94,24 @@ export async function twoWayDecider(
 	const mkdirRemoteTasks: BaseTask[] = []
 	const noopFolderTasks: BaseTask[] = []
 
+	// ════════════════════════════════════════════════════════════════════
+	// 文件决策真值表（local / remote / record / localChanged / remoteChanged）
+	//  	┌ local  remote  record  L变  R变 ─ 决策
+	//  1.	│  ✓      ✗       ✗      -    -   → push（本地新文件）
+	//  2.	│  ✓      ✗       ✓      ✓    -   → push（本地变、远端删）
+	//  3.	│  ✓      ✗       ✓      ✗    -   → remove-local（本地没变、远端删）
+	//  4.	│  ✗      ✓       ✗      -    -   → pull（远端新文件）
+	//  5.	│  ✗      ✓       ✓      -    ✓   → pull（远端变、本地删）
+	//  6.	│  ✗      ✓       ✓      -    ✗   → remove-remote（远端没变、本地删）
+	//  7.	│  ✓      ✓       ✗      -    -   → LOOSE特例noop / conflict
+	//  8.	│  ✓      ✓       ✓      ✗    ✗   → noop（都没变）
+	//  9.	│  ✓      ✓       ✓      ✓    ✗   → push
+	//  10.	│  ✓      ✓       ✓      ✗    ✓   → pull
+	//  11.	│  ✓      ✓       ✓      ✓    ✓   → conflict
+	// 	 └ 每个动作前 guard：size>max → SkippedTask(FileTooLarge)；
+	//     文件名非法 → FilenameErrorTask
+	// ════════════════════════════════════════════════════════════════════
+
 	// * sync files
 	for (const p of mixedPath) {
 		const remote = remoteStatsMap.get(p)
@@ -101,244 +122,220 @@ export async function twoWayDecider(
 			localPath: p,
 			remoteBaseDir,
 		}
+		// 文件夹：下方两个 folder 循环单独处理
 		if (local?.isDir || remote?.isDir) {
 			continue
 		}
-		if (record) {
-			if (remote) {
-				const remoteChanged = !isSameTime(remote.mtime, record.remote.mtime)
-				if (local) {
-					let localChanged = !isSameTime(local.mtime, record.local.mtime)
-					if (localChanged && record.base?.key) {
-						const baseContent = await getBaseContent(record.base.key)
-						if (baseContent) {
-							localChanged = !(await compareFileContent(
-								local.path,
-								baseContent,
-							))
-						}
-					}
-					if (remoteChanged) {
-						if (localChanged) {
-							logDecision('both changed → conflict', p)
-							if (remote.size > maxFileSize || local.size > maxFileSize) {
-								tasks.push(
-									taskFactory.createSkippedTask({
-										...options,
-										reason: SkipReason.FileTooLarge,
-										maxSize: maxFileSize,
-										remoteSize: remote.size,
-										localSize: local.size,
-									}),
-								)
-								continue
-							}
 
-							if (hasFilenameError(local.path)) {
-								tasks.push(taskFactory.createFilenameErrorTask(options))
-							} else {
-								tasks.push(
-									taskFactory.createConflictResolveTask({
-										...options,
-										record,
-										strategy:
-											settings.conflictStrategy === 'latest-timestamp'
-												? ConflictStrategy.LatestTimeStamp
-												: ConflictStrategy.DiffMatchPatch,
-										localStat: local,
-										remoteStat: remote,
-										useGitStyle: settings.useGitStyle,
-									}),
-								)
-							}
-
-							continue
-						} else {
-							logDecision('remote changed → pull', p)
-							if (remote.size > maxFileSize) {
-								tasks.push(
-									taskFactory.createSkippedTask({
-										...options,
-										reason: SkipReason.FileTooLarge,
-										maxSize: maxFileSize,
-										remoteSize: remote.size,
-										localSize: local.size,
-									}),
-								)
-								continue
-							}
-							tasks.push(
-								taskFactory.createPullTask({
-									...options,
-									remoteSize: remote.size,
-								}),
-							)
-							continue
-						}
-					} else {
-						if (localChanged) {
-							logDecision('local changed → push', p)
-							if (local.size > maxFileSize) {
-								tasks.push(
-									taskFactory.createSkippedTask({
-										...options,
-										reason: SkipReason.FileTooLarge,
-										maxSize: maxFileSize,
-										remoteSize: remote.size,
-										localSize: local.size,
-									}),
-								)
-								continue
-							}
-							if (hasFilenameError(local.path)) {
-								tasks.push(taskFactory.createFilenameErrorTask(options))
-							} else {
-								tasks.push(taskFactory.createPushTask(options))
-							}
-							continue
-						}
-					}
-				} else {
-					if (remoteChanged) {
-						logDecision('remote changed, no local → pull', p)
-						if (remote.size > maxFileSize) {
-							tasks.push(
-								taskFactory.createSkippedTask({
-									...options,
-									reason: SkipReason.FileTooLarge,
-									maxSize: maxFileSize,
-									remoteSize: remote.size,
-								}),
-							)
-							continue
-						}
-						tasks.push(
-							taskFactory.createPullTask({
-								...options,
-								remoteSize: remote.size,
-							}),
-						)
-						continue
-					} else {
-						logDecision('remote not changed, no local → remove remote', p)
-						tasks.push(taskFactory.createRemoveRemoteTask(options))
-						continue
-					}
+	
+		//1. ── 仅本地存在 ──
+		if (local && !remote) {
+			// 本地新文件 / 本地变（远端已删）
+			if (!record) {
+				logDecision('local only, no record → push', p)
+				if (local.size > maxFileSize) {
+					tasks.push(taskFactory.createSkippedTask({
+						...options,
+						reason: SkipReason.FileTooLarge,
+						localSize: local.size,
+						maxSize: maxFileSize,
+					}))
+					continue
 				}
-			} else if (local) {
-				const localChanged = !isSameTime(local.mtime, record.local.mtime)
-				if (localChanged) {
-					logDecision('local changed, no remote → push', p)
-					if (local.size > maxFileSize) {
-						tasks.push(
-							taskFactory.createSkippedTask({
-								...options,
-								reason: SkipReason.FileTooLarge,
-								localSize: local.size,
-								maxSize: maxFileSize,
-							}),
-						)
-						continue
-					}
-					if (hasFilenameError(local.path)) {
-						tasks.push(taskFactory.createFilenameErrorTask(options))
-					} else {
-						tasks.push(taskFactory.createPushTask(options))
-					}
-					continue
+				if (hasFilenameError(local.path)) {
+					tasks.push(taskFactory.createFilenameErrorTask(options))
 				} else {
-					logDecision('local not changed, no remote → remove local', p)
-					tasks.push(taskFactory.createRemoveLocalTask(options))
+					tasks.push(taskFactory.createPushTask(options))
+				}
+				continue
+			}
+
+			const localChanged = !isSameTime(local.mtime, record.local.mtime)
+			if (localChanged) {
+				logDecision('local changed, no remote → push', p)
+				if (local.size > maxFileSize) {
+					tasks.push(taskFactory.createSkippedTask({
+						...options,
+						reason: SkipReason.FileTooLarge,
+						localSize: local.size,
+						maxSize: maxFileSize,
+					}))
 					continue
+				}
+				if (hasFilenameError(local.path)) {
+					tasks.push(taskFactory.createFilenameErrorTask(options))
+				} else {
+					tasks.push(taskFactory.createPushTask(options))
+				}
+				continue
+			}
+
+			logDecision('local not changed, no remote → remove local', p)
+			tasks.push(taskFactory.createRemoveLocalTask(options))
+			continue
+		}
+
+		//2. ── 仅远端存在 ──
+		if (!local && remote) {
+			// 远端新文件 / 远端变（本地已删）
+			if (!record) {
+				logDecision('remote only, no record → pull', p)
+				if (remote.size > maxFileSize) {
+					tasks.push(taskFactory.createSkippedTask({
+						...options,
+						reason: SkipReason.FileTooLarge,
+						remoteSize: remote.size,
+						maxSize: maxFileSize,
+					}))
+					continue
+				}
+				tasks.push(
+					taskFactory.createPullTask({ ...options, remoteSize: remote.size }),
+				)
+				continue
+			}
+
+			const remoteChanged = !isSameTime(remote.mtime, record.remote.mtime)
+			if (remoteChanged) {
+				logDecision('remote changed, no local → pull', p)
+				if (remote.size > maxFileSize) {
+					tasks.push(taskFactory.createSkippedTask({
+						...options,
+						reason: SkipReason.FileTooLarge,
+						remoteSize: remote.size,
+						maxSize: maxFileSize,
+					}))
+					continue
+				}
+				tasks.push(
+					taskFactory.createPullTask({ ...options, remoteSize: remote.size }),
+				)
+				continue
+			}
+
+			logDecision('remote not changed, no local → remove remote', p)
+			tasks.push(taskFactory.createRemoveRemoteTask(options))
+			continue
+		}
+
+		//3. ── 双方存在、无记录（首次相遇）──
+		if (local && remote && !record) {
+			if (
+				settings.syncMode === SyncMode.LOOSE &&
+				!remote.isDeleted &&
+				!remote.isDir &&
+				remote.size === local.size&&
+   				(await isContentSameOrUndecided(local, remote))
+			) {
+				tasks.push(taskFactory.createNoopTask({ ...options }))
+				continue
+			}
+			logDecision('both exist, no record → conflict', p)
+			if (remote.size > maxFileSize || local.size > maxFileSize) {
+				tasks.push(taskFactory.createSkippedTask({
+					...options,
+					reason: SkipReason.FileTooLarge,
+					remoteSize: remote.size,
+					localSize: local.size,
+					maxSize: maxFileSize,
+				}))
+				continue
+			}
+			if (hasFilenameError(local.path)) {
+				tasks.push(taskFactory.createFilenameErrorTask(options))
+			} else {
+				tasks.push(taskFactory.createConflictResolveTask({
+					...options,
+					strategy: ConflictStrategy.DiffMatchPatch,
+					localStat: local,
+					remoteStat: remote,
+					useGitStyle: settings.useGitStyle,
+					nonMarkdownStrategy: settings.nonMarkdownConflictStrategy,
+				}))
+			}
+			continue
+		}
+
+		//4. ── 双方存在、有记录 → 按 changed 组合 ──
+			if (local && remote && record) {
+			let localChanged = !isSameTime(local.mtime, record.local.mtime)
+			if (localChanged && record.base?.key) {
+				const baseContent = await getBaseContent(record.base.key)
+				if (baseContent) {
+					localChanged = !(await compareFileContent(local.path, baseContent))
 				}
 			}
-		} else {
-			if (remote) {
-				if (local) {
-					if (
-						settings.syncMode === SyncMode.LOOSE &&
-						!remote.isDeleted &&
-						!remote.isDir &&
-						remote.size === local.size
-					) {
-						tasks.push(
-							taskFactory.createNoopTask({
-								...options,
-							}),
-						)
-						continue
-					}
-					logDecision('both exist, no record → conflict', p)
+			const remoteChanged = !isSameTime(remote.mtime, record.remote.mtime)
 
-					if (remote.size > maxFileSize || local.size > maxFileSize) {
-						tasks.push(
-							taskFactory.createSkippedTask({
-								...options,
-								reason: SkipReason.FileTooLarge,
-								remoteSize: remote.size,
-								localSize: local.size,
-								maxSize: maxFileSize,
-							}),
-						)
-						continue
-					}
+			if (!localChanged && !remoteChanged) {
+				// noop — 都没变
+				continue
+			}
 
-					if (hasFilenameError(local.path)) {
-						tasks.push(taskFactory.createFilenameErrorTask(options))
-					} else {
-						tasks.push(
-							taskFactory.createConflictResolveTask({
-								...options,
-								strategy: ConflictStrategy.DiffMatchPatch,
-								localStat: local,
-								remoteStat: remote,
-								useGitStyle: settings.useGitStyle,
-							}),
-						)
-					}
-
+			if (localChanged && !remoteChanged) {
+				logDecision('local changed → push', p)
+				if (local.size > maxFileSize) {
+					tasks.push(taskFactory.createSkippedTask({
+						...options,
+						reason: SkipReason.FileTooLarge,
+						maxSize: maxFileSize,
+						remoteSize: remote.size,
+						localSize: local.size,
+					}))
 					continue
+				}
+				if (hasFilenameError(local.path)) {
+					tasks.push(taskFactory.createFilenameErrorTask(options))
 				} else {
-					logDecision('remote only, no record → pull', p)
+					tasks.push(taskFactory.createPushTask(options))
+				}
+				continue
+			}
 
-					if (remote.size > maxFileSize) {
-						tasks.push(
-							taskFactory.createSkippedTask({
-								...options,
-								reason: SkipReason.FileTooLarge,
-								remoteSize: remote.size,
-								maxSize: maxFileSize,
-							}),
-						)
-						continue
-					}
-					tasks.push(
-						taskFactory.createPullTask({ ...options, remoteSize: remote.size }),
-					)
+			if (!localChanged && remoteChanged) {
+				logDecision('remote changed → pull', p)
+				if (remote.size > maxFileSize) {
+					tasks.push(taskFactory.createSkippedTask({
+						...options,
+						reason: SkipReason.FileTooLarge,
+						maxSize: maxFileSize,
+						remoteSize: remote.size,
+					}))
 					continue
 				}
+				tasks.push(
+					taskFactory.createPullTask({ ...options, remoteSize: remote.size }),
+				)
+				continue
+			}
+
+			// both changed → conflict
+			logDecision('both changed → conflict', p)
+			if (remote.size > maxFileSize || local.size > maxFileSize) {
+				tasks.push(taskFactory.createSkippedTask({
+					...options,
+					reason: SkipReason.FileTooLarge,
+					maxSize: maxFileSize,
+					remoteSize: remote.size,
+					localSize: local.size,
+				}))
+				continue
+			}
+			if (hasFilenameError(local.path)) {
+				tasks.push(taskFactory.createFilenameErrorTask(options))
 			} else {
-				if (local) {
-					logDecision('local only, no record → push', p)
-
-					if (local.size > maxFileSize) {
-						tasks.push(
-							taskFactory.createSkippedTask({
-								...options,
-								reason: SkipReason.FileTooLarge,
-								localSize: local.size,
-								maxSize: maxFileSize,
-							}),
-						)
-						continue
-					}
-					if (hasFilenameError(local.path)) {
-						tasks.push(taskFactory.createFilenameErrorTask(options))
-					} else {
-						tasks.push(taskFactory.createPushTask(options))
-					}
-					continue
-				}
+				tasks.push(taskFactory.createConflictResolveTask({
+					...options,
+					record,
+					strategy:
+						settings.conflictStrategy === 'latest-timestamp'
+							? ConflictStrategy.LatestTimeStamp
+							: ConflictStrategy.DiffMatchPatch,
+					localStat: local,
+					remoteStat: remote,
+					useGitStyle: settings.useGitStyle,
+					nonMarkdownStrategy: settings.nonMarkdownConflictStrategy,
+				}))
 			}
 		}
 	}
@@ -348,10 +345,8 @@ export async function twoWayDecider(
 		const local = localStatsMap.get(recordPath)
 		const remote = remoteStatsMap.get(recordPath)
 
-		// If both local and remote don't exist, but record exists, clean the record
 		if (!local && !remote) {
 			logDecision('orphaned record → clean', recordPath)
-
 			tasks.push(
 				taskFactory.createCleanRecordTask({
 					remotePath: recordPath,
@@ -384,10 +379,8 @@ export async function twoWayDecider(
 						remoteBaseDir,
 					}),
 				)
-				continue
 			}
 		} else if (record) {
-			// Use sub-items check instead of mtime check
 			const remoteChanged = hasFolderContentChanged(
 				remote.path,
 				remoteStatsFiltered,
@@ -397,7 +390,6 @@ export async function twoWayDecider(
 
 			if (remoteChanged) {
 				logDecision('remote folder content changed → mkdir local', localPath)
-
 				mkdirLocalTasks.push(
 					taskFactory.createMkdirLocalTask({
 						localPath,
@@ -431,10 +423,8 @@ export async function twoWayDecider(
 					remoteBaseDir,
 				}),
 			)
-			continue
 		} else {
 			logDecision('remote folder not in local → mkdir local', localPath)
-
 			mkdirLocalTasks.push(
 				taskFactory.createMkdirLocalTask({
 					localPath,
@@ -442,8 +432,6 @@ export async function twoWayDecider(
 					remoteBaseDir,
 				}),
 			)
-
-			continue
 		}
 	}
 
@@ -467,7 +455,6 @@ export async function twoWayDecider(
 			}
 		} else {
 			if (record) {
-				// Use sub-items check instead of mtime check
 				const localChanged = hasFolderContentChanged(
 					local.path,
 					localStatsFiltered,
@@ -520,29 +507,30 @@ export async function twoWayDecider(
 						remoteBaseDir,
 					}),
 				)
-			} else {
-				logDecision('local folder not in remote → mkdir remote', local.path)
-				if (hasFilenameError(local.path)) {
-					tasks.push(
-						taskFactory.createFilenameErrorTask({
-							localPath: local.path,
-							remotePath: local.path,
-							remoteBaseDir,
-						}),
-					)
-				} else {
-					mkdirRemoteTasks.push(
-						taskFactory.createMkdirRemoteTask({
-							localPath: local.path,
-							remotePath: local.path,
-							remoteBaseDir,
-						}),
-					)
-				}
 				continue
+			}
+
+			logDecision('local folder not in remote → mkdir remote', local.path)
+			if (hasFilenameError(local.path)) {
+				tasks.push(
+					taskFactory.createFilenameErrorTask({
+						localPath: local.path,
+						remotePath: local.path,
+						remoteBaseDir,
+					}),
+				)
+			} else {
+				mkdirRemoteTasks.push(
+					taskFactory.createMkdirRemoteTask({
+						localPath: local.path,
+						remotePath: local.path,
+						remoteBaseDir,
+					}),
+				)
 			}
 			continue
 		}
+
 		if (!remote.isDir) {
 			throw new Error(
 				`Folder conflict: local path ${local.path} is a folder but remote path ${remote.path} is a file`,
@@ -566,3 +554,4 @@ export async function twoWayDecider(
 	tasks.splice(0, 0, ...allFolderTasks)
 	return tasks
 }
+

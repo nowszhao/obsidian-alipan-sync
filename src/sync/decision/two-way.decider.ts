@@ -21,6 +21,9 @@ import {
 	TaskOptions,
 } from './sync-decision.interface'
 import { twoWayDecider } from './two-way.decider.function'
+import { sha1Hex } from '~/utils/sha256'
+import { localFileSha1, CONTENT_HASH_LIMIT } from '~/utils/content-hash'
+import { StatModel } from '~/model/stat.model'
 
 export default class TwoWaySyncDecider extends BaseSyncDecider {
 	async decide(): Promise<BaseTask[]> {
@@ -37,6 +40,7 @@ export default class TwoWaySyncDecider extends BaseSyncDecider {
 			vault: this.vault,
 			remoteBaseDir: this.remoteBaseDir,
 			syncRecord: syncRecordStorage,
+			app: this.app,
 		}
 
 		// 创建Task工厂
@@ -82,7 +86,22 @@ export default class TwoWaySyncDecider extends BaseSyncDecider {
 			}
 			return await blob.arrayBuffer()
 		}
-
+		// LOOSE 内容级校验：远端 hash 免费（API），本地懒算（阈值内）
+		const sizeOf = (s?: StatModel) => (s && !s.isDir ? s.size : undefined)
+		const compareLocalRemote = async (
+			local: StatModel,
+			remote: StatModel,
+		): Promise<boolean | undefined> => {
+			if (sizeOf( local) !== sizeOf(remote)) return false       // 双保险
+			const file = this.vault.getFileByPath(local.path)
+			if (!file) return false
+			const localHash = await localFileSha1(this.vault, file,
+				this.settings.contentHashLimitMB * 1024 * 1024,
+			)  // >1MB 返回 undefined
+			if (!localHash) return undefined                   // 大文件降级
+			if (remote.contentHash) return localHash === remote.contentHash
+			return undefined                                   // 远端无 hash → 退回 size 猜测
+		}
 		// 调用纯函数进行决策
 		return await twoWayDecider({
 			settings: {
@@ -90,6 +109,7 @@ export default class TwoWaySyncDecider extends BaseSyncDecider {
 				conflictStrategy: this.settings.conflictStrategy,
 				useGitStyle: this.settings.useGitStyle,
 				syncMode: this.settings.syncMode,
+				nonMarkdownConflictStrategy: this.settings.nonMarkdownConflictStrategy,
 			},
 			localStats,
 			remoteStats,
@@ -97,6 +117,7 @@ export default class TwoWaySyncDecider extends BaseSyncDecider {
 			remoteBaseDir: this.remoteBaseDir,
 			getBaseContent,
 			compareFileContent,
+			compareLocalRemote,
 			taskFactory,
 		})
 	}

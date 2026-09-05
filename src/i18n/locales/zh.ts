@@ -4,6 +4,12 @@ export default {
 		filenameTooLong: '文件 {{path}} 名称过长（UTF-8 编码超过 1024 字节），无法上传',
 	},
 	settings: {
+		nonMarkdownConflict: {
+			name: '非 Markdown 冲突策略',
+			desc: '二进制文件两端同时修改时的处理方式',
+			latestTimestamp: '最新时间戳（自动）',
+			manual: '手动选择保留谁',
+			},
 		title: '阿里云盘同步设置',
 		language: {
 			name: '语言',
@@ -271,6 +277,10 @@ export default {
 				deleteError: '删除缓存文件出错: {{message}}',
 			},
 		},
+		contentHashLimit: {
+			name: '内容哈希计算上限',
+			desc: '本地文件超过此大小（MB）时不计算内容哈希，用于冲突/一致判定。默认 100。遇到同步慢可降低此值；设很小则退化为按大小判断。',
+		},
 	},
 	sync: {
 		failed: '同步失败!',
@@ -385,5 +395,22 @@ export default {
 		hoursAgo: '{{count}}小时前',
 		daysAgo: '{{count}}天前',
 		longAgo: '很久前',
+	},
+	conflictResolve: {	
+		title: '非 Markdown 文件冲突',
+		instruction: '本地和云端都修改了该二进制文件，无法自动合并。请选择保留哪一份：',
+		localColumn: '本地',
+		remoteColumn: '云端',
+		useLocal: '保留本地',
+		useRemote: '保留云端',
+		skip: '跳过（稍后处理）',
+		pathColumn: '路径',
+		createdColumn: '创建时间',
+		modifiedColumn: '修改时间',
+		sizeColumn: '大小',
+		hashColumn: '内容指纹',
+		hashSame: '⚠️ 两端内容一致，仅元数据差异，任选一边都安全',
+		hashDiff: '⚠️ 两端内容确实不同，请确认保留哪边',
+		hashMissing: '（大文件未做内容校验，请结合时间/大小判断）',
 	},
 }
