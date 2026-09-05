@@ -16,3 +16,10 @@ export async function sha256Base64(data: ArrayBuffer) {
 	const hashBase64 = fromUint8Array(new Uint8Array(hashBuffer), false)
 	return hashBase64
 }
+
+// src/utils/sha256.ts 追加
+export async function sha1Hex(data: ArrayBuffer) {
+    const hashBuffer = await crypto.subtle.digest('SHA-1', data)
+    const hashArray = Array.from(new Uint8Array(hashBuffer))
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+}

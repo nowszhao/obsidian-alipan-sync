@@ -331,7 +331,7 @@ export class AlipanSync {
 
 			// Track all completed tasks across all chunks
 			const allCompletedTasks: BaseTask[] = []
-
+			const allTasks: BaseTask[] = []
 			for (const taskChunk of taskChunks) {
 				const chunkResult = await this.execTasks(
 					taskChunk,
@@ -339,13 +339,16 @@ export class AlipanSync {
 					allCompletedTasks,
 				)
 				allTasksResult.push(...chunkResult)
-				await this.updateMtimeInRecord(taskChunk, chunkResult)
+				allTasks.push(...taskChunk)
+				//await this.updateMtimeInRecord(taskChunk, chunkResult)
 
 				if (this.isCancelled) {
 					break
 				}
 			}
-
+			// ↓ 加：循环结束后统一更新一次
+			await this.updateMtimeInRecord(allTasks, allTasksResult)
+			
 			const failedCount = allTasksResult.filter((r) => !r.success).length
 
 			if (mode === SyncStartMode.MANUAL_SYNC && failedCount > 0) {

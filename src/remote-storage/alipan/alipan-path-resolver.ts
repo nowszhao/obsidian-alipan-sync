@@ -42,6 +42,19 @@ export class AlipanPathResolver {
 	 */
 	set(path: string, fileId: string): void {
 		path = this.normalizePath(path)
+		
+	// 该路径之前指向别的 file_id → 清理旧逆向映射（仅当旧 id 还指向本路径）
+		const oldFileId = this.pathToId.get(path)
+		if (oldFileId && oldFileId !== fileId && this.idToPath.get(oldFileId) === path) {
+			this.idToPath.delete(oldFileId)
+		}
+
+		// 该 file_id 之前映射到别的路径 → 清理旧正向残留
+		const oldPath = this.idToPath.get(fileId)
+		if (oldPath && oldPath !== path && this.pathToId.get(oldPath) === fileId) {
+			this.pathToId.delete(oldPath)
+		}
+
 		this.pathToId.set(path, fileId)
 		this.idToPath.set(fileId, path)
 	}
@@ -213,6 +226,7 @@ export class AlipanPathResolver {
 			})
 
 			for (const item of result.items) {
+				if (item.trashed) continue
 				if (item.name === name) {
 					return item.file_id
 				}

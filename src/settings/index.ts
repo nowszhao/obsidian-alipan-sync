@@ -10,7 +10,7 @@ import CacheSettings from './cache'
 import CommonSettings from './common'
 import FilterSettings from './filter'
 import LogSettings from './log'
-
+import { NonMarkdownConflictStrategy } from '../sync/tasks/conflict-resolve.task'
 export enum SyncMode {
 	STRICT = 'strict',
 	LOOSE = 'loose',
@@ -57,9 +57,11 @@ export interface AlipanSyncSettings {
 	remoteCacheDir?: string
 	useGitStyle: boolean
 	conflictStrategy: ConflictStrategy
+	nonMarkdownConflictStrategy: NonMarkdownConflictStrategy
 	confirmBeforeSync: boolean
 	confirmBeforeDeleteInAutoSync: boolean
 	syncMode: SyncMode
+	contentHashLimitMB: number
 	filterRules: {
 		exclusionRules: GlobMatchOptions[]
 		inclusionRules: GlobMatchOptions[]

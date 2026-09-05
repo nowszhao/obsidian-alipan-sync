@@ -1,5 +1,50 @@
 # Changelog
 
+现在开始修改的是基于fork的nowszhao的1.1.11版本，为了区分，我会在我的版本号加一个wk作为标识。
+
+## [wk1.2.0] - 2026-09-05 fork by nowszhao1.1.11。
+
+### Added
+- **非 Markdown 冲突手动选择策略**：新增 `nonMarkdownConflictStrategy` 设置（`latest-timestamp` / `manual`），手动模式下冲突弹窗由用户决定保留本地或远端
+- **冲突解决弹窗增强**：显示路径、创建时间、修改时间、大小、内容指纹（sha1 前 10 位），并提示两端内容是否一致
+- **内容哈希上限可配置**：新增 `contentHashLimitMB` 设置（默认 100MB），控制本地哈希计算阈值，界面提示"同步慢可降低此值"
+- **LOOSE 模式内容级一致性判定**：首次相遇文件用内容 sha1 比对替代纯 size 猜测，避免"不同内容、同大小"误判
+- **下载重试机制**：网络错误退避重试 + 429 按服务端等待时间重试（最多 3 次）
+- **上传 429 频率限制处理**：解析服务端建议等待时间后重试
+- **API 请求统一队列限流**：所有请求走 `apiLimiter.schedule()`，替代散落的手动 sleep
+- **StatModel 扩展**：本地/远端 stat 增加 `ctime`、`contentHash` 字段，冲突弹窗可展示
+- **任务结果显示"跳过"**：被跳过（非合并）的冲突任务在完成列表中正确显示
+
+### Settings（新增设置界面）
+- **设置 → 通用：非 Markdown 冲突策略** 下拉——最新时间戳（自动）/ 手动选择保留谁
+- **设置 → 通用：内容哈希上限（MB）** 输入框——默认 100，附"同步变慢时降低此值"说明
+
+### Changed
+- **覆盖上传逻辑**：由"先删旧文件再上传"改为 `auto_rename` 上传后 `moveFile` 移回原名，消除删除窗口导致的远端路径短暂不可见
+- **上传接口启用秒传**：`createFile` 携带 `content_hash`（sha1）与 `content_hash_name`
+- **请求限流方式**：手动 `sleep` 间隔 → `apiLimiter` 队列调度，最小间隔 200ms → 300ms
+- **路径解析器缓存维护**：`set()` 时清理旧正向/逆向映射残留，避免脏缓存指向错误 file_id
+- **冲突弹窗本地哈希懒算**：仅弹窗前算一次本地 sha1，超阈值自动降级
+- **远端记录更新单次统一执行**：`updateMtimeInRecord` 由每块调用改为同步结束统一调用
+
+### Fixed
+- **静默删本地文件隐患**：覆盖上传窗口内旧文件进回收站、新文件创建失败 → 下次同步误删本地文件
+- **下载失败**：`getFileContents` 缓存 file_id 指向回收站时自动刷新缓存重试
+- **远端哈希为空**：阿里 list 接口补请求 `fields: 'content_hash'`
+- **非 Markdown 冲突无限重试**：二进制冲突独立策略 + 决策后 `skipRecord`，不再陷入死循环
+- **i18n 配置项层级错误**：`contentHashLimit` 移入 settings 段
+- **路径遍历混入回收站项**：walk 时跳过 trashed 条目
+
+### Performance
+- **哈希成本三道闸**：size 快筛 → 阈值保护 → 懒算，兼顾手机端与大文件库
+- **消除 O(N²) 远端遍历**：全量 `remoteFs.walk()` 一次同步仅一次，索引化后查 Map
+
+
+
+
+
+
+
 本项目的所有重要更改都将记录在此文件中。All notable changes to this project will be documented in this file.
 
 > **Note**: This project was forked from [Obsidian Nutstore Sync](https://github.com/nutstore/obsidian-nutstore-sync).

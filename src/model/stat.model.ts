@@ -4,7 +4,9 @@ export type StatModel =
 			basename: string
 			isDir: true
 			isDeleted: boolean
-			mtime?: number
+			mtime?: number			
+			ctime?:number
+			contentHash?: string
 	  }
 	| {
 			path: string
@@ -13,4 +15,6 @@ export type StatModel =
 			isDeleted: boolean
 			mtime: number
 			size: number
+			ctime?:number
+			contentHash?: string
 	  }

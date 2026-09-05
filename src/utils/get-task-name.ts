@@ -19,7 +19,9 @@ export default function getTaskName(task: BaseTask) {
 		return i18n.t('sync.fileOp.cleanRecord')
 	}
 	if (task instanceof ConflictResolveTask) {
-		return i18n.t('sync.fileOp.merge')
+		return task.resolvedBySkip
+			? i18n.t('sync.fileOp.skip')
+			: i18n.t('sync.fileOp.merge')
 	}
 	if (task instanceof FilenameErrorTask) {
 		return i18n.t('sync.fileOp.filenameError')

@@ -4,12 +4,14 @@ import { SyncMode } from '~/settings'
 import { ConflictStrategy } from '../tasks/conflict-resolve.task'
 import { SkipReason } from '../tasks/skipped.task'
 import { BaseTask } from '../tasks/task.interface'
+import { NonMarkdownConflictStrategy } from '../tasks/conflict-resolve.task'
 
 export interface SyncDecisionSettings {
 	skipLargeFiles: { maxSize: string }
 	conflictStrategy: ConflictStrategy
 	useGitStyle: boolean
 	syncMode: SyncMode
+	nonMarkdownConflictStrategy: NonMarkdownConflictStrategy
 }
 
 export interface SyncRecordItem {
@@ -30,6 +32,7 @@ export interface ConflictTaskOptions extends TaskOptions {
 	localStat: StatModel
 	remoteStat: StatModel
 	useGitStyle: boolean
+	nonMarkdownStrategy: NonMarkdownConflictStrategy
 }
 
 export interface PullTaskOptions extends TaskOptions {
@@ -83,6 +86,12 @@ export interface SyncDecisionInput {
 	syncRecords: Map<string, SyncRecordItem>
 	remoteBaseDir: string
 	getBaseContent: (key: string) => Promise<ArrayBuffer | null>
+	
+	compareLocalRemote?: (
+		local: StatModel,
+		remote: StatModel,
+	) => Promise<boolean | undefined>
+	
 	compareFileContent: (
 		filePath: string,
 		baseContent: ArrayBuffer,
